@@ -1,7 +1,18 @@
 import numpy as np
 import pandas as pd
 from sklearn.metrics.pairwise import cosine_similarity
+from flask import Flask, request, jsonify
 
+app = Flask(__name__)
+
+# Load dataset (ensure `spotify_dataset.csv` is in the same directory)
+try:
+    songs = pd.read_csv("spotify_dataset.csv")
+except FileNotFoundError:
+    songs = None
+    print("Error: Dataset file not found. Ensure 'spotify_dataset.csv' is in the project directory.")
+
+# Recommender Class
 class ContentBasedRecommender:
     def __init__(self, data):
         self.data = data
@@ -17,12 +28,11 @@ class ContentBasedRecommender:
         # Compute cosine similarity matrix
         self.similarity_matrix = cosine_similarity(self.normalized_data[self.numeric_features])
 
-    def recommend(self, track_name, number_songs):
+    def recommend(self, track_name, number_songs=5):
         # Find the index of the song in the dataset
-        song_index = self.data[self.data['track_name'] == track_name].index
+        song_index = self.data[self.data['track_name'].str.lower() == track_name.lower()].index
         if len(song_index) == 0:
-            print("Song not found in the dataset.")
-            return
+            return {"error": "Song not found in the dataset."}
         song_index = song_index[0]
 
         # Get similarity scores for the song and sort them in descending order
@@ -41,28 +51,34 @@ class ContentBasedRecommender:
                 recommendations.append({
                     'track_name': track_info['track_name'],
                     'artist': track_info['track_artist'],
-                    'similarity_score': song_similarities[i],
-                    'features': {feature: track_info[feature] for feature in self.numeric_features}
+                    'similarity_score': float(song_similarities[i]),  # Convert numpy float to regular float
+                    'features': {feature: float(track_info[feature]) for feature in self.numeric_features}
                 })
 
-        # Print recommendations
-        for i, rec in enumerate(recommendations, start=1):
-            print(f"Number {i}:")
-            print(f"{rec['track_name']} by {rec['artist']} with {rec['similarity_score']} similarity score calculated based on:")
-            for feature, value in rec['features'].items():
-                print(f"- {feature}: {value}")
-            print("-" * 20)
+        return {"recommendations": recommendations}
 
-if __name__ == "__main__":
-    # Load the dataset
-    songs = pd.read_csv('C:/Users/Sabar/Desktop/Mini Project/spotify dataset.csv')  # Update the path to your dataset
-
-    # Create an instance of the recommender
+# Initialize the recommender if data is available
+if songs is not None:
     recommender = ContentBasedRecommender(songs)
 
-    # Take input from the user
-    track_name = input("Enter the track name: ")
-    number_songs = int(input("Enter the number of songs to recommend: "))
+# API Route
+@app.route("/")
+def home():
+    return "Welcome to the Spotify Recommendation API!"
 
-    # Generate recommendations
-    recommender.recommend(track_name, number_songs)
+@app.route("/recommend", methods=["GET"])
+def recommend():
+    if songs is None:
+        return jsonify({"error": "Dataset not found"}), 500
+
+    track_name = request.args.get("song")
+    number_songs = request.args.get("num", default=5, type=int)
+
+    if not track_name:
+        return jsonify({"error": "Please provide a song name using the 'song' parameter"}), 400
+
+    recommendations = recommender.recommend(track_name, number_songs)
+    return jsonify(recommendations)
+
+if __name__ == "__main__":
+    app.run(debug=True)
